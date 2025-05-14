@@ -1,0 +1,9 @@
+flask
+librosa
+numpy
+scikit-learn
+pydub
+werkzeug
+pandas
+seaborn
+matplotlib
