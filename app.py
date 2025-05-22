@@ -3,32 +3,35 @@ from pydantic import BaseModel
 from transformers import pipeline
 import re
 import uvicorn
+import os
 
 app = FastAPI()
 
-# Load both emotion classifiers
-anger_classifier = pipeline(
-    "text-classification",
-    model="j-hartmann/emotion-english-distilroberta-base",
-    top_k=None,
-    truncation=True,
-    max_length=512,
-    framework="pt"
-)
+# Declare classifiers globally but don't load yet
+anger_classifier = None
+other_classifier = None
 
-other_classifier = pipeline(
-    "text-classification",
-    model="cardiffnlp/twitter-roberta-base-emotion",
-    top_k=None,
-    truncation=True,
-    max_length=512,
-    framework="pt"
-)
+@app.on_event("startup")
+def load_models():
+    global anger_classifier, other_classifier
+    anger_classifier = pipeline(
+        "text-classification",
+        model="j-hartmann/emotion-english-distilroberta-base",
+        top_k=None,
+        truncation=True,
+        max_length=512,
+        framework="pt"
+    )
+    other_classifier = pipeline(
+        "text-classification",
+        model="cardiffnlp/twitter-roberta-base-emotion",
+        top_k=None,
+        truncation=True,
+        max_length=512,
+        framework="pt"
+    )
 
 def clean_text(text):
-    """
-    Clean WebRTC transcription text by adding punctuation, removing filler words, and normalizing.
-    """
     text = re.sub(r'\b(um|uh|like|you know)\b', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\s+', ' ', text).strip().lower()
     text = re.sub(r'\b(why isn\'t|what the|are you serious|come on|i did not|this is ridiculous|you kidding|fix it|do better|unacceptable|driving me nuts|broken again|worst service|keep crashing|complete disaster|so annoying|totally unacceptable|fed up|nonsense|tired of)\b', r'\1.', text)
@@ -39,9 +42,6 @@ def clean_text(text):
     return text
 
 def is_neutral_query(text):
-    """
-    Rule-based check for neutral queries, ensuring high confidence.
-    """
     neutral_patterns = [
         r'^(what|how|when|where|can you|could you|tell me|is it|hey).*?\?$',
         r'^(please|could you|would you|hey).*?(schedule|set|find|look up|tell me|explain|reset|alarm).*'
@@ -53,9 +53,6 @@ def is_neutral_query(text):
     return False
 
 def is_anger_query(text):
-    """
-    Rule-based check for anger-related queries or statements.
-    """
     anger_patterns = [
         r'\b(why isn\'t|what the|are you serious|come on|i did not expect|this is ridiculous|you kidding|fix it|do better|unacceptable|driving me nuts|broken again|worst service|keep crashing|complete disaster|so annoying|totally unacceptable|fed up|nonsense|not working|failing|broken|messed up|tired of)\b'
     ]
@@ -63,9 +60,6 @@ def is_anger_query(text):
     return any(re.search(pattern, text) for pattern in anger_patterns)
 
 def predict_emotion_from_text(text):
-    """
-    Predict emotion using j-hartmann for anger and cardiffnlp for other emotions.
-    """
     try:
         text = clean_text(text)
         if not text:
@@ -106,11 +100,6 @@ class TextInput(BaseModel):
 
 @app.post('/predict_emotion')
 async def predict_emotion(input: TextInput):
-    """
-    REST API endpoint to predict emotion from text input.
-    Expects JSON payload with 'text' field.
-    Returns JSON with emotion, confidence, and status.
-    """
     try:
         text = input.text
         if not isinstance(text, str) or not text.strip():
@@ -148,5 +137,6 @@ async def predict_emotion(input: TextInput):
             }
         )
 
-if __name__ == '__main__':
-    uvicorn.run(app, host='0.0.0.0', port=8000)
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 9000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
